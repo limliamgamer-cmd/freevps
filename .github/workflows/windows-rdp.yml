@@ -5,9 +5,8 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2025-96core
 
-    # GitHub-hosted runners: maximum 6 hours per job
     timeout-minutes: 360
 
     steps:
@@ -35,10 +34,8 @@ jobs:
       - name: 2. Optimize Windows for Performance
         shell: powershell
         run: |
-          # High performance power plan
           powercfg /setactive SCHEME_MIN
 
-          # RDP performance policies
           $policyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
 
           if (-not (Test-Path $policyPath)) {
@@ -75,34 +72,6 @@ jobs:
             -Value 1 `
             -Force | Out-Null
 
-          # Disable unnecessary visual effects
-          $visualPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects'
-
-          if (-not (Test-Path $visualPath)) {
-            New-Item -Path $visualPath -Force | Out-Null
-          }
-
-          New-ItemProperty -Path $visualPath `
-            -Name 'VisualFXSetting' `
-            -PropertyType DWord `
-            -Value 2 `
-            -Force | Out-Null
-
-          # Faster menus / less animation
-          Set-ItemProperty `
-            -Path 'HKCU:\Control Panel\Desktop' `
-            -Name 'MenuShowDelay' `
-            -Type String `
-            -Value '0'
-
-          Set-ItemProperty `
-            -Path 'HKCU:\Control Panel\Desktop' `
-            -Name 'DragFullWindows' `
-            -Type String `
-            -Value '0'
-
-          Write-Host "Performance optimizations applied."
-
       - name: 3. Reduce Background Services
         shell: powershell
         run: |
@@ -114,39 +83,18 @@ jobs:
           )
 
           foreach ($service in $services) {
-            try {
-              Stop-Service `
-                -Name $service `
-                -Force `
-                -ErrorAction SilentlyContinue
-
-              Set-Service `
-                -Name $service `
-                -StartupType Disabled `
-                -ErrorAction SilentlyContinue
-            }
-            catch {
-              Write-Host "Skipping $service"
-            }
+            Stop-Service -Name $service -Force -ErrorAction SilentlyContinue
+            Set-Service -Name $service -StartupType Disabled -ErrorAction SilentlyContinue
           }
-
-          Write-Host "Background services reduced."
 
       - name: 4. Create Admin Account
         shell: powershell
         run: |
           $Username = "Mmdi"
           $PasswordPlain = "P@ssw0rd1qazXSW@#"
-          $Password = ConvertTo-SecureString `
-            $PasswordPlain `
-            -AsPlainText `
-            -Force
+          $Password = ConvertTo-SecureString $PasswordPlain -AsPlainText -Force
 
-          $existingUser = Get-LocalUser `
-            -Name $Username `
-            -ErrorAction SilentlyContinue
-
-          if (-not $existingUser) {
+          if (-not (Get-LocalUser -Name $Username -ErrorAction SilentlyContinue)) {
             New-LocalUser `
               -Name $Username `
               -Password $Password `
@@ -160,16 +108,10 @@ jobs:
             -Member $Username `
             -ErrorAction SilentlyContinue
 
-          Write-Host "======================================"
-          Write-Host "Username: $Username"
-          Write-Host "Password: $PasswordPlain"
-          Write-Host "======================================"
-
       - name: 5. Install Tailscale
         shell: powershell
         env:
           TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
-
         run: |
           $installer = "C:\tailscale.msi"
 
@@ -203,14 +145,12 @@ jobs:
             throw "Could not obtain Tailscale IPv4 address."
           }
 
-          Write-Host ""
-          Write-Host "=================================================="
-          Write-Host "           RDP SERVER IS READY"
-          Write-Host "=================================================="
+          Write-Host "=============================================="
+          Write-Host "RDP SERVER READY"
           Write-Host "Tailscale IP : $ts_ip"
           Write-Host "Username     : Mmdi"
           Write-Host "Password     : P@ssw0rd1qazXSW@#"
-          Write-Host "=================================================="
+          Write-Host "=============================================="
 
       - name: 6. Keep Server Alive
         shell: powershell
