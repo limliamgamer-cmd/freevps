@@ -5,8 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-2025-96core
-
+    runs-on: windows-latest
     timeout-minutes: 360
 
     steps:
@@ -17,90 +16,51 @@ jobs:
           $rdpPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
           $tcpPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
 
-          Set-ItemProperty -Path $rdpPath `
-            -Name 'fDenyTSConnections' `
-            -Type DWord `
-            -Value 0
-
-          Set-ItemProperty -Path $tcpPath `
-            -Name 'UserAuthentication' `
-            -Type DWord `
-            -Value 0
-
+          Set-ItemProperty -Path $rdpPath -Name 'fDenyTSConnections' -Type DWord -Value 0
+          Set-ItemProperty -Path $tcpPath -Name 'UserAuthentication' -Type DWord -Value 0
           Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
 
-          Write-Host "Remote Desktop enabled."
-
-      - name: 2. Optimize Windows for Performance
+      - name: 2. Max Performance
         shell: powershell
         run: |
+          # High Performance power plan
           powercfg /setactive SCHEME_MIN
 
+          # Disable visual effects
+          $visualPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects'
+          if (-not (Test-Path $visualPath)) {
+              New-Item -Path $visualPath -Force | Out-Null
+          }
+
+          Set-ItemProperty -Path $visualPath -Name 'VisualFXSetting' -Type DWord -Value 2
+
+          # Disable unnecessary RDP effects
           $policyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
-
           if (-not (Test-Path $policyPath)) {
-            New-Item -Path $policyPath -Force | Out-Null
+              New-Item -Path $policyPath -Force | Out-Null
           }
 
-          New-ItemProperty -Path $policyPath `
-            -Name 'fDisableWallpaper' `
-            -PropertyType DWord `
-            -Value 1 `
-            -Force | Out-Null
+          New-ItemProperty -Path $policyPath -Name 'fDisableWallpaper' -PropertyType DWord -Value 1 -Force | Out-Null
+          New-ItemProperty -Path $policyPath -Name 'fDisableFullWindowDrag' -PropertyType DWord -Value 1 -Force | Out-Null
+          New-ItemProperty -Path $policyPath -Name 'fDisableMenuAnims' -PropertyType DWord -Value 1 -Force | Out-Null
+          New-ItemProperty -Path $policyPath -Name 'fDisableThemes' -PropertyType DWord -Value 1 -Force | Out-Null
+          New-ItemProperty -Path $policyPath -Name 'fDisableFontSmoothing' -PropertyType DWord -Value 1 -Force | Out-Null
 
-          New-ItemProperty -Path $policyPath `
-            -Name 'fDisableFullWindowDrag' `
-            -PropertyType DWord `
-            -Value 1 `
-            -Force | Out-Null
-
-          New-ItemProperty -Path $policyPath `
-            -Name 'fDisableMenuAnims' `
-            -PropertyType DWord `
-            -Value 1 `
-            -Force | Out-Null
-
-          New-ItemProperty -Path $policyPath `
-            -Name 'fDisableThemes' `
-            -PropertyType DWord `
-            -Value 1 `
-            -Force | Out-Null
-
-          New-ItemProperty -Path $policyPath `
-            -Name 'fDisableFontSmoothing' `
-            -PropertyType DWord `
-            -Value 1 `
-            -Force | Out-Null
-
-      - name: 3. Reduce Background Services
-        shell: powershell
-        run: |
-          $services = @(
-            'DiagTrack',
-            'MapsBroker',
-            'Fax',
-            'WSearch'
-          )
-
-          foreach ($service in $services) {
-            Stop-Service -Name $service -Force -ErrorAction SilentlyContinue
-            Set-Service -Name $service -StartupType Disabled -ErrorAction SilentlyContinue
-          }
-
-      - name: 4. Create Admin Account
+      - name: 3. Create Admin Account
         shell: powershell
         run: |
           $Username = "Mmdi"
           $PasswordPlain = "P@ssw0rd1qazXSW@#"
           $Password = ConvertTo-SecureString $PasswordPlain -AsPlainText -Force
 
-          if (-not (Get-LocalUser -Name $Username -ErrorAction SilentlyContinue)) {
-            New-LocalUser `
-              -Name $Username `
-              -Password $Password `
-              -PasswordNeverExpires `
-              -AccountNeverExpires `
-              -UserMayNotChangePassword
+          $user = Get-LocalUser -Name $Username -ErrorAction SilentlyContinue
+
+          if (-not $user) {
+              New-LocalUser `
+                -Name $Username `
+                -Password $Password `
+                -PasswordNeverExpires `
+                -AccountNeverExpires
           }
 
           Add-LocalGroupMember `
@@ -108,7 +68,9 @@ jobs:
             -Member $Username `
             -ErrorAction SilentlyContinue
 
-      - name: 5. Install Tailscale
+          Write-Host "Username: $Username"
+
+      - name: 4. Install Tailscale
         shell: powershell
         env:
           TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
@@ -128,10 +90,6 @@ jobs:
 
           $tailscale = "C:\Program Files\Tailscale\tailscale.exe"
 
-          if (-not (Test-Path $tailscale)) {
-            throw "Tailscale installation failed."
-          }
-
           & $tailscale up `
             --authkey="$Env:TAILSCALE_AUTHKEY" `
             --hostname="github-rdp-server" `
@@ -141,21 +99,36 @@ jobs:
 
           $ts_ip = (& $tailscale ip -4 | Select-Object -First 1).Trim()
 
-          if ([string]::IsNullOrWhiteSpace($ts_ip)) {
-            throw "Could not obtain Tailscale IPv4 address."
-          }
-
+          Write-Host ""
           Write-Host "=============================================="
           Write-Host "RDP SERVER READY"
           Write-Host "Tailscale IP : $ts_ip"
           Write-Host "Username     : Mmdi"
-          Write-Host "Password     : P@ssw0rd1qazXSW@#"
+          Write-Host "Password     : $PasswordPlain"
           Write-Host "=============================================="
+
+      - name: 5. Detect CPU And Disk
+        shell: powershell
+        run: |
+          Write-Host "===== CPU ====="
+          Get-CimInstance Win32_Processor |
+            Select-Object Name, NumberOfCores, NumberOfLogicalProcessors |
+            Format-List
+
+          Write-Host "===== RAM ====="
+          Get-CimInstance Win32_ComputerSystem |
+            Select-Object TotalPhysicalMemory |
+            Format-List
+
+          Write-Host "===== DISK ====="
+          Get-PhysicalDisk |
+            Select-Object FriendlyName, MediaType, Size |
+            Format-Table -AutoSize
 
       - name: 6. Keep Server Alive
         shell: powershell
         run: |
           while ($true) {
-            Start-Sleep -Seconds 60
-            Write-Host "Server running..."
+              Start-Sleep -Seconds 60
+              Write-Host "Server running..."
           }
