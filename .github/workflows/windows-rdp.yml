@@ -5,54 +5,154 @@ on:
 
 jobs:
   build:
-    runs-on:
-      - self-hosted
-      - windows
-      - YOUR_RUNNER_LABEL
+    runs-on: windows-latest
 
+    # GitHub-hosted runners: maximum 6 hours per job
     timeout-minutes: 360
 
     steps:
-      - name: Enable RDP
+
+      - name: 1. Enable Remote Desktop
         shell: powershell
         run: |
           $rdpPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
           $tcpPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
 
-          Set-ItemProperty -Path $rdpPath -Name 'fDenyTSConnections' -Type DWord -Value 0
-          Set-ItemProperty -Path $tcpPath -Name 'UserAuthentication' -Type DWord -Value 0
+          Set-ItemProperty -Path $rdpPath `
+            -Name 'fDenyTSConnections' `
+            -Type DWord `
+            -Value 0
+
+          Set-ItemProperty -Path $tcpPath `
+            -Name 'UserAuthentication' `
+            -Type DWord `
+            -Value 0
+
           Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
 
-      - name: Optimize RDP
+          Write-Host "Remote Desktop enabled."
+
+      - name: 2. Optimize Windows for Performance
         shell: powershell
         run: |
-          $path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
-
-          if (-not (Test-Path $path)) {
-            New-Item -Path $path -Force | Out-Null
-          }
-
-          New-ItemProperty -Path $path -Name 'fDisableWallpaper' -PropertyType DWord -Value 1 -Force | Out-Null
-          New-ItemProperty -Path $path -Name 'fDisableFullWindowDrag' -PropertyType DWord -Value 1 -Force | Out-Null
-          New-ItemProperty -Path $path -Name 'fDisableMenuAnims' -PropertyType DWord -Value 1 -Force | Out-Null
-          New-ItemProperty -Path $path -Name 'fDisableThemes' -PropertyType DWord -Value 1 -Force | Out-Null
-          New-ItemProperty -Path $path -Name 'fDisableFontSmoothing' -PropertyType DWord -Value 1 -Force | Out-Null
-
+          # High performance power plan
           powercfg /setactive SCHEME_MIN
 
-      - name: Create RDP User
+          # RDP performance policies
+          $policyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
+
+          if (-not (Test-Path $policyPath)) {
+            New-Item -Path $policyPath -Force | Out-Null
+          }
+
+          New-ItemProperty -Path $policyPath `
+            -Name 'fDisableWallpaper' `
+            -PropertyType DWord `
+            -Value 1 `
+            -Force | Out-Null
+
+          New-ItemProperty -Path $policyPath `
+            -Name 'fDisableFullWindowDrag' `
+            -PropertyType DWord `
+            -Value 1 `
+            -Force | Out-Null
+
+          New-ItemProperty -Path $policyPath `
+            -Name 'fDisableMenuAnims' `
+            -PropertyType DWord `
+            -Value 1 `
+            -Force | Out-Null
+
+          New-ItemProperty -Path $policyPath `
+            -Name 'fDisableThemes' `
+            -PropertyType DWord `
+            -Value 1 `
+            -Force | Out-Null
+
+          New-ItemProperty -Path $policyPath `
+            -Name 'fDisableFontSmoothing' `
+            -PropertyType DWord `
+            -Value 1 `
+            -Force | Out-Null
+
+          # Disable unnecessary visual effects
+          $visualPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects'
+
+          if (-not (Test-Path $visualPath)) {
+            New-Item -Path $visualPath -Force | Out-Null
+          }
+
+          New-ItemProperty -Path $visualPath `
+            -Name 'VisualFXSetting' `
+            -PropertyType DWord `
+            -Value 2 `
+            -Force | Out-Null
+
+          # Faster menus / less animation
+          Set-ItemProperty `
+            -Path 'HKCU:\Control Panel\Desktop' `
+            -Name 'MenuShowDelay' `
+            -Type String `
+            -Value '0'
+
+          Set-ItemProperty `
+            -Path 'HKCU:\Control Panel\Desktop' `
+            -Name 'DragFullWindows' `
+            -Type String `
+            -Value '0'
+
+          Write-Host "Performance optimizations applied."
+
+      - name: 3. Reduce Background Services
+        shell: powershell
+        run: |
+          $services = @(
+            'DiagTrack',
+            'MapsBroker',
+            'Fax',
+            'WSearch'
+          )
+
+          foreach ($service in $services) {
+            try {
+              Stop-Service `
+                -Name $service `
+                -Force `
+                -ErrorAction SilentlyContinue
+
+              Set-Service `
+                -Name $service `
+                -StartupType Disabled `
+                -ErrorAction SilentlyContinue
+            }
+            catch {
+              Write-Host "Skipping $service"
+            }
+          }
+
+          Write-Host "Background services reduced."
+
+      - name: 4. Create Admin Account
         shell: powershell
         run: |
           $Username = "Mmdi"
           $PasswordPlain = "P@ssw0rd1qazXSW@#"
-          $Password = ConvertTo-SecureString $PasswordPlain -AsPlainText -Force
+          $Password = ConvertTo-SecureString `
+            $PasswordPlain `
+            -AsPlainText `
+            -Force
 
-          if (-not (Get-LocalUser -Name $Username -ErrorAction SilentlyContinue)) {
+          $existingUser = Get-LocalUser `
+            -Name $Username `
+            -ErrorAction SilentlyContinue
+
+          if (-not $existingUser) {
             New-LocalUser `
               -Name $Username `
               -Password $Password `
               -PasswordNeverExpires `
-              -AccountNeverExpires
+              -AccountNeverExpires `
+              -UserMayNotChangePassword
           }
 
           Add-LocalGroupMember `
@@ -60,25 +160,35 @@ jobs:
             -Member $Username `
             -ErrorAction SilentlyContinue
 
-      - name: Install Tailscale
+          Write-Host "======================================"
+          Write-Host "Username: $Username"
+          Write-Host "Password: $PasswordPlain"
+          Write-Host "======================================"
+
+      - name: 5. Install Tailscale
         shell: powershell
         env:
           TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+
         run: |
           $installer = "C:\tailscale.msi"
 
           Invoke-WebRequest `
-            "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" `
+            -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" `
             -OutFile $installer
 
           Start-Process `
-            "msiexec.exe" `
+            -FilePath "msiexec.exe" `
             -ArgumentList "/i `"$installer`" /quiet /norestart" `
             -Wait
 
           Start-Sleep -Seconds 5
 
           $tailscale = "C:\Program Files\Tailscale\tailscale.exe"
+
+          if (-not (Test-Path $tailscale)) {
+            throw "Tailscale installation failed."
+          }
 
           & $tailscale up `
             --authkey="$Env:TAILSCALE_AUTHKEY" `
@@ -87,15 +197,22 @@ jobs:
 
           Start-Sleep -Seconds 8
 
-          $ts_ip = & $tailscale ip -4
+          $ts_ip = (& $tailscale ip -4 | Select-Object -First 1).Trim()
 
-          Write-Host "=========================================="
-          Write-Host "RDP SERVER READY"
-          Write-Host "IP       : $ts_ip"
-          Write-Host "Username : Mmdi"
-          Write-Host "=========================================="
+          if ([string]::IsNullOrWhiteSpace($ts_ip)) {
+            throw "Could not obtain Tailscale IPv4 address."
+          }
 
-      - name: Keep Alive
+          Write-Host ""
+          Write-Host "=================================================="
+          Write-Host "           RDP SERVER IS READY"
+          Write-Host "=================================================="
+          Write-Host "Tailscale IP : $ts_ip"
+          Write-Host "Username     : Mmdi"
+          Write-Host "Password     : P@ssw0rd1qazXSW@#"
+          Write-Host "=================================================="
+
+      - name: 6. Keep Server Alive
         shell: powershell
         run: |
           while ($true) {
