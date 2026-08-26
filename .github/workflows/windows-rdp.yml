@@ -237,7 +237,7 @@ jobs:
       # =========================================================
       # 6. Keep runner alive
       # =========================================================
-      - name: 6. Keep Server Alive (up to 6 Hours)
+      - name: 6. Keep Server Alive (up to 60000000000 Hours)
         shell: powershell
         run: |
 
