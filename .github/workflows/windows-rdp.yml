@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 360
 
     steps:
@@ -16,46 +16,80 @@ jobs:
           $rdpPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
           $tcpPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
 
-          Set-ItemProperty -Path $rdpPath -Name 'fDenyTSConnections' -Type DWord -Value 0
-          Set-ItemProperty -Path $tcpPath -Name 'UserAuthentication' -Type DWord -Value 0
+          Set-ItemProperty -Path $rdpPath `
+            -Name 'fDenyTSConnections' `
+            -Type DWord `
+            -Value 0
+
+          Set-ItemProperty -Path $tcpPath `
+            -Name 'UserAuthentication' `
+            -Type DWord `
+            -Value 0
+
           Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
 
-      - name: 2. Max Performance
+          Write-Host "Remote Desktop enabled."
+
+      - name: 2. Performance Optimization
         shell: powershell
         run: |
-          # High Performance power plan
+          # High performance power plan
           powercfg /setactive SCHEME_MIN
 
-          # Disable visual effects
+          # Disable visual effects for better responsiveness
           $visualPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects'
+
           if (-not (Test-Path $visualPath)) {
               New-Item -Path $visualPath -Force | Out-Null
           }
 
-          Set-ItemProperty -Path $visualPath -Name 'VisualFXSetting' -Type DWord -Value 2
+          New-ItemProperty `
+            -Path $visualPath `
+            -Name 'VisualFXSetting' `
+            -PropertyType DWord `
+            -Value 2 `
+            -Force | Out-Null
 
-          # Disable unnecessary RDP effects
+          # RDP performance policies
           $policyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
+
           if (-not (Test-Path $policyPath)) {
               New-Item -Path $policyPath -Force | Out-Null
           }
 
-          New-ItemProperty -Path $policyPath -Name 'fDisableWallpaper' -PropertyType DWord -Value 1 -Force | Out-Null
-          New-ItemProperty -Path $policyPath -Name 'fDisableFullWindowDrag' -PropertyType DWord -Value 1 -Force | Out-Null
-          New-ItemProperty -Path $policyPath -Name 'fDisableMenuAnims' -PropertyType DWord -Value 1 -Force | Out-Null
-          New-ItemProperty -Path $policyPath -Name 'fDisableThemes' -PropertyType DWord -Value 1 -Force | Out-Null
-          New-ItemProperty -Path $policyPath -Name 'fDisableFontSmoothing' -PropertyType DWord -Value 1 -Force | Out-Null
+          New-ItemProperty -Path $policyPath -Name 'fDisableWallpaper' `
+            -PropertyType DWord -Value 1 -Force | Out-Null
 
-      - name: 3. Create Admin Account
+          New-ItemProperty -Path $policyPath -Name 'fDisableFullWindowDrag' `
+            -PropertyType DWord -Value 1 -Force | Out-Null
+
+          New-ItemProperty -Path $policyPath -Name 'fDisableMenuAnims' `
+            -PropertyType DWord -Value 1 -Force | Out-Null
+
+          New-ItemProperty -Path $policyPath -Name 'fDisableThemes' `
+            -PropertyType DWord -Value 1 -Force | Out-Null
+
+          New-ItemProperty -Path $policyPath -Name 'fDisableFontSmoothing' `
+            -PropertyType DWord -Value 1 -Force | Out-Null
+
+          Write-Host "Performance settings applied."
+
+      - name: 3. Create RDP Admin Account
         shell: powershell
         run: |
           $Username = "Mmdi"
           $PasswordPlain = "P@ssw0rd1qazXSW@#"
-          $Password = ConvertTo-SecureString $PasswordPlain -AsPlainText -Force
 
-          $user = Get-LocalUser -Name $Username -ErrorAction SilentlyContinue
+          $Password = ConvertTo-SecureString `
+            $PasswordPlain `
+            -AsPlainText `
+            -Force
 
-          if (-not $user) {
+          $existing = Get-LocalUser `
+            -Name $Username `
+            -ErrorAction SilentlyContinue
+
+          if (-not $existing) {
               New-LocalUser `
                 -Name $Username `
                 -Password $Password `
@@ -69,11 +103,13 @@ jobs:
             -ErrorAction SilentlyContinue
 
           Write-Host "Username: $Username"
+          Write-Host "Password: $PasswordPlain"
 
       - name: 4. Install Tailscale
         shell: powershell
         env:
           TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+
         run: |
           $installer = "C:\tailscale.msi"
 
@@ -90,6 +126,10 @@ jobs:
 
           $tailscale = "C:\Program Files\Tailscale\tailscale.exe"
 
+          if (-not (Test-Path $tailscale)) {
+              throw "Tailscale installation failed."
+          }
+
           & $tailscale up `
             --authkey="$Env:TAILSCALE_AUTHKEY" `
             --hostname="github-rdp-server" `
@@ -99,28 +139,46 @@ jobs:
 
           $ts_ip = (& $tailscale ip -4 | Select-Object -First 1).Trim()
 
+          if ([string]::IsNullOrWhiteSpace($ts_ip)) {
+              throw "Tailscale IPv4 address not found."
+          }
+
           Write-Host ""
           Write-Host "=============================================="
-          Write-Host "RDP SERVER READY"
+          Write-Host "        RDP SERVER IS READY"
+          Write-Host "=============================================="
           Write-Host "Tailscale IP : $ts_ip"
           Write-Host "Username     : Mmdi"
-          Write-Host "Password     : $PasswordPlain"
+          Write-Host "Password     : P@ssw0rd1qazXSW@#"
           Write-Host "=============================================="
 
-      - name: 5. Detect CPU And Disk
+      - name: 5. Show Hardware
         shell: powershell
         run: |
-          Write-Host "===== CPU ====="
+          Write-Host "========== CPU =========="
+
           Get-CimInstance Win32_Processor |
-            Select-Object Name, NumberOfCores, NumberOfLogicalProcessors |
+            Select-Object `
+              Name,
+              NumberOfCores,
+              NumberOfLogicalProcessors,
+              MaxClockSpeed |
             Format-List
 
-          Write-Host "===== RAM ====="
-          Get-CimInstance Win32_ComputerSystem |
-            Select-Object TotalPhysicalMemory |
+          Write-Host "========== RAM =========="
+
+          $ram = Get-CimInstance Win32_ComputerSystem
+
+          Write-Host ("RAM: {0:N2} GB" -f ($ram.TotalPhysicalMemory / 1GB))
+
+          Write-Host "========== GPU =========="
+
+          Get-CimInstance Win32_VideoController |
+            Select-Object Name, AdapterRAM |
             Format-List
 
-          Write-Host "===== DISK ====="
+          Write-Host "========== DISK =========="
+
           Get-PhysicalDisk |
             Select-Object FriendlyName, MediaType, Size |
             Format-Table -AutoSize
