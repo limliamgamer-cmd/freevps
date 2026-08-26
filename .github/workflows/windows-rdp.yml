@@ -5,12 +5,15 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    # IMPORTANT:
+    # Replace YOUR_GPU_RUNNER_LABEL with the label of your
+    # GitHub-hosted GPU larger runner.
+    runs-on: YOUR_GPU_RUNNER_LABEL
 
+    # GitHub-hosted runners have a 6-hour maximum job runtime.
     timeout-minutes: 360
 
     steps:
-
       - name: 1. Enable Remote Desktop
         shell: powershell
         run: |
@@ -21,15 +24,16 @@ jobs:
           Set-ItemProperty -Path $tcpPath -Name 'UserAuthentication' -Type DWord -Value 0
           Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
 
+          # Lower RDP color depth to reduce bandwidth/latency
           Set-ItemProperty -Path $tcpPath -Name 'ColorDepth' -Type DWord -Value 4
 
-      - name: 2. Optimize Windows for RDP
+      - name: 2. Optimize Windows for Performance
         shell: powershell
         run: |
           $policyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
 
           if (-not (Test-Path $policyPath)) {
-              New-Item -Path $policyPath -Force | Out-Null
+            New-Item -Path $policyPath -Force | Out-Null
           }
 
           New-ItemProperty -Path $policyPath -Name 'fDisableWallpaper' -PropertyType DWord -Value 1 -Force | Out-Null
@@ -38,34 +42,18 @@ jobs:
           New-ItemProperty -Path $policyPath -Name 'fDisableThemes' -PropertyType DWord -Value 1 -Force | Out-Null
           New-ItemProperty -Path $policyPath -Name 'fDisableFontSmoothing' -PropertyType DWord -Value 1 -Force | Out-Null
 
+          # High-performance power plan
+          powercfg /setactive SCHEME_MIN
+
+          # Disable unnecessary visual effects
           $visualPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects'
           if (-not (Test-Path $visualPath)) {
-              New-Item -Path $visualPath -Force | Out-Null
+            New-Item -Path $visualPath -Force | Out-Null
           }
 
           New-ItemProperty -Path $visualPath -Name 'VisualFXSetting' -PropertyType DWord -Value 2 -Force | Out-Null
 
-          $desktopPath = 'HKCU:\Control Panel\Desktop'
-          Set-ItemProperty -Path $desktopPath -Name 'MenuShowDelay' -Type String -Value '0'
-          Set-ItemProperty -Path $desktopPath -Name 'DragFullWindows' -Type String -Value '0'
-
-      - name: 3. Reduce Background Load
-        shell: powershell
-        run: |
-          $services = @(
-            'DiagTrack',
-            'SysMain',
-            'MapsBroker',
-            'Fax',
-            'WSearch'
-          )
-
-          foreach ($service in $services) {
-              Stop-Service -Name $service -Force -ErrorAction SilentlyContinue
-              Set-Service -Name $service -StartupType Disabled -ErrorAction SilentlyContinue
-          }
-
-      - name: 4. Create Admin Account
+      - name: 3. Create Admin Account
         shell: powershell
         run: |
           $Username = "Mmdi"
@@ -73,20 +61,19 @@ jobs:
           $Password = ConvertTo-SecureString $PasswordPlain -AsPlainText -Force
 
           if (-not (Get-LocalUser -Name $Username -ErrorAction SilentlyContinue)) {
-              New-LocalUser `
-                -Name $Username `
-                -Password $Password `
-                -PasswordNeverExpires `
-                -UserMayNotChangePassword `
-                -AccountNeverExpires
+            New-LocalUser `
+              -Name $Username `
+              -Password $Password `
+              -PasswordNeverExpires `
+              -AccountNeverExpires
           }
 
-          Add-LocalGroupMember -Group "Administrators" -Member $Username -ErrorAction SilentlyContinue
+          Add-LocalGroupMember `
+            -Group "Administrators" `
+            -Member $Username `
+            -ErrorAction SilentlyContinue
 
-          Write-Host "RDP USER: $Username"
-          Write-Host "RDP PASSWORD: $PasswordPlain"
-
-      - name: 5. Install & Connect Tailscale
+      - name: 4. Install Tailscale
         shell: powershell
         env:
           TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
@@ -115,19 +102,19 @@ jobs:
 
           $ts_ip = & $tailscale ip -4
 
-          Write-Host "=================================================="
-          Write-Host "RDP SERVER IS READY!"
+          Write-Host "=============================================="
+          Write-Host "RDP SERVER READY"
           Write-Host "Tailscale IP : $ts_ip"
           Write-Host "Username     : Mmdi"
-          Write-Host "Password     : $PasswordPlain"
-          Write-Host "=================================================="
+          Write-Host "Password     : P@ssw0rd1qazXSW@#"
+          Write-Host "=============================================="
 
-      - name: 6. Keep Server Alive (Very Long)
+      - name: 5. Keep Server Alive
         shell: powershell
         run: |
-          $totalMinutes = 999999999
+          $totalMinutes = 330
 
           for ($i = 1; $i -le $totalMinutes; $i++) {
-              Start-Sleep -Seconds 60
-              Write-Host "[$i/$totalMinutes] Server running..."
+            Start-Sleep -Seconds 60
+            Write-Host "[$i/$totalMinutes] Server running..."
           }
