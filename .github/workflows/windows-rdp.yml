@@ -5,16 +5,15 @@ on:
 
 jobs:
   build:
-    # IMPORTANT:
-    # Replace YOUR_GPU_RUNNER_LABEL with the label of your
-    # GitHub-hosted GPU larger runner.
-    runs-on: YOUR_GPU_RUNNER_LABEL
+    runs-on:
+      - self-hosted
+      - windows
+      - YOUR_RUNNER_LABEL
 
-    # GitHub-hosted runners have a 6-hour maximum job runtime.
     timeout-minutes: 360
 
     steps:
-      - name: 1. Enable Remote Desktop
+      - name: Enable RDP
         shell: powershell
         run: |
           $rdpPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
@@ -24,36 +23,24 @@ jobs:
           Set-ItemProperty -Path $tcpPath -Name 'UserAuthentication' -Type DWord -Value 0
           Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
 
-          # Lower RDP color depth to reduce bandwidth/latency
-          Set-ItemProperty -Path $tcpPath -Name 'ColorDepth' -Type DWord -Value 4
-
-      - name: 2. Optimize Windows for Performance
+      - name: Optimize RDP
         shell: powershell
         run: |
-          $policyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
+          $path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
 
-          if (-not (Test-Path $policyPath)) {
-            New-Item -Path $policyPath -Force | Out-Null
+          if (-not (Test-Path $path)) {
+            New-Item -Path $path -Force | Out-Null
           }
 
-          New-ItemProperty -Path $policyPath -Name 'fDisableWallpaper' -PropertyType DWord -Value 1 -Force | Out-Null
-          New-ItemProperty -Path $policyPath -Name 'fDisableFullWindowDrag' -PropertyType DWord -Value 1 -Force | Out-Null
-          New-ItemProperty -Path $policyPath -Name 'fDisableMenuAnims' -PropertyType DWord -Value 1 -Force | Out-Null
-          New-ItemProperty -Path $policyPath -Name 'fDisableThemes' -PropertyType DWord -Value 1 -Force | Out-Null
-          New-ItemProperty -Path $policyPath -Name 'fDisableFontSmoothing' -PropertyType DWord -Value 1 -Force | Out-Null
+          New-ItemProperty -Path $path -Name 'fDisableWallpaper' -PropertyType DWord -Value 1 -Force | Out-Null
+          New-ItemProperty -Path $path -Name 'fDisableFullWindowDrag' -PropertyType DWord -Value 1 -Force | Out-Null
+          New-ItemProperty -Path $path -Name 'fDisableMenuAnims' -PropertyType DWord -Value 1 -Force | Out-Null
+          New-ItemProperty -Path $path -Name 'fDisableThemes' -PropertyType DWord -Value 1 -Force | Out-Null
+          New-ItemProperty -Path $path -Name 'fDisableFontSmoothing' -PropertyType DWord -Value 1 -Force | Out-Null
 
-          # High-performance power plan
           powercfg /setactive SCHEME_MIN
 
-          # Disable unnecessary visual effects
-          $visualPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects'
-          if (-not (Test-Path $visualPath)) {
-            New-Item -Path $visualPath -Force | Out-Null
-          }
-
-          New-ItemProperty -Path $visualPath -Name 'VisualFXSetting' -PropertyType DWord -Value 2 -Force | Out-Null
-
-      - name: 3. Create Admin Account
+      - name: Create RDP User
         shell: powershell
         run: |
           $Username = "Mmdi"
@@ -73,7 +60,7 @@ jobs:
             -Member $Username `
             -ErrorAction SilentlyContinue
 
-      - name: 4. Install Tailscale
+      - name: Install Tailscale
         shell: powershell
         env:
           TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
@@ -102,19 +89,16 @@ jobs:
 
           $ts_ip = & $tailscale ip -4
 
-          Write-Host "=============================================="
+          Write-Host "=========================================="
           Write-Host "RDP SERVER READY"
-          Write-Host "Tailscale IP : $ts_ip"
-          Write-Host "Username     : Mmdi"
-          Write-Host "Password     : P@ssw0rd1qazXSW@#"
-          Write-Host "=============================================="
+          Write-Host "IP       : $ts_ip"
+          Write-Host "Username : Mmdi"
+          Write-Host "=========================================="
 
-      - name: 5. Keep Server Alive
+      - name: Keep Alive
         shell: powershell
         run: |
-          $totalMinutes = 330
-
-          for ($i = 1; $i -le $totalMinutes; $i++) {
+          while ($true) {
             Start-Sleep -Seconds 60
-            Write-Host "[$i/$totalMinutes] Server running..."
+            Write-Host "Server running..."
           }
