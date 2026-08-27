@@ -77,7 +77,7 @@ jobs:
       - name: 3. Create RDP Admin Account
         shell: powershell
         run: |
-          $Username = "Mmdi"
+          $Username = "TVAdmin"
           $PasswordPlain = "P@ssw0rd1qazXSW@#"
 
           $Password = ConvertTo-SecureString `
@@ -148,7 +148,7 @@ jobs:
           Write-Host "        RDP SERVER IS READY"
           Write-Host "=============================================="
           Write-Host "Tailscale IP : $ts_ip"
-          Write-Host "Username     : M"
+          Write-Host "Username     : TVAdmin"
           Write-Host "Password     : P@ssw0rd1qazXSW@#"
           Write-Host "=============================================="
 
