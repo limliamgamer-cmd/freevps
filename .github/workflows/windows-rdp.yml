@@ -148,7 +148,7 @@ jobs:
           Write-Host "        RDP SERVER IS READY"
           Write-Host "=============================================="
           Write-Host "Tailscale IP : $ts_ip"
-          Write-Host "Username     : Mmdi"
+          Write-Host "Username     : M"
           Write-Host "Password     : P@ssw0rd1qazXSW@#"
           Write-Host "=============================================="
 
